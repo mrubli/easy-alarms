@@ -43,7 +43,7 @@ func (u *UI) setupTray() {
 		u.trayNext,
 		fyne.NewMenuItemSeparator(),
 		fyne.NewMenuItem("Abrir Easy Alarms", func() {
-			u.win.Show()
+			u.showMain()
 			u.win.RequestFocus()
 		}),
 		quick,

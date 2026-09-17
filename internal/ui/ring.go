@@ -44,7 +44,7 @@ func (u *UI) Ring(a *alarm.Alarm) {
 		}
 		u.commit()
 
-		u.win.Show()
+		u.showMain()
 		u.win.RequestFocus()
 		big := canvas.NewText("⏰", theme.Color(theme.ColorNameForeground))
 		big.TextSize = 48

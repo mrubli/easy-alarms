@@ -49,6 +49,14 @@ type UI struct {
 	riseLast  string
 	setLast   string
 
+	// visible tracks whether the main window is currently shown (as opposed
+	// to minimized to tray). refreshLoop skips the header/list repaint work
+	// while hidden, since nobody can see it and it would otherwise burn CPU
+	// once a second forever in the background. Only ever touched on the
+	// Fyne main thread (window callbacks and refreshLoop's fyne.Do), so it
+	// needs no locking.
+	visible bool
+
 	// ring state (main thread only): open ring dialogs, whether the alarm
 	// sound is playing, and the auto-silence cap timer.
 	ringDialogs int
@@ -85,7 +93,7 @@ func New(a fyne.App, st *store.Store, sched *alarm.Scheduler, player *audio.Play
 func (u *UI) Run(hidden bool) {
 	u.app.SetIcon(appIcon)
 	u.win = u.app.NewWindow("Easy Alarms")
-	u.win.SetCloseIntercept(u.win.Hide) // close button minimizes to tray
+	u.win.SetCloseIntercept(u.hideMain) // close button minimizes to tray
 
 	newAlarm := widget.NewButton("⏰  Nueva alarma", func() {
 		u.showEditDialog(alarm.New(alarm.KindClock), true)
@@ -136,9 +144,31 @@ func (u *UI) Run(hidden bool) {
 	go u.refreshLoop()
 
 	if !hidden {
-		u.win.Show()
+		u.showMain()
 	}
 	u.app.Run()
+}
+
+// showMain and hideMain wrap Window.Show/Hide to track visibility, so
+// refreshLoop knows when it can skip repainting the header and list: nobody
+// can see them while minimized to the tray, so doing that work every second
+// forever in the background would just burn CPU for nothing.
+func (u *UI) showMain() {
+	u.visible = true
+	u.updateClock(time.Now()) // catch up: the header was frozen while hidden
+	for _, r := range u.rows {
+		if next := u.rowWhen(r.alarm, time.Now()); next != r.last {
+			r.last = next
+			r.when.Text = next
+			r.when.Refresh()
+		}
+	}
+	u.win.Show()
+}
+
+func (u *UI) hideMain() {
+	u.visible = false
+	u.win.Hide()
 }
 
 // commit persists state, re-arms the scheduler and redraws the list. Call
@@ -439,21 +469,28 @@ func (u *UI) applySettings() {
 	u.updateClock(now)
 }
 
-// refreshLoop keeps the "rings in..." labels ticking. It only touches labels
-// whose text actually changed, so an idle window does no rendering work.
+// refreshLoop keeps the header clock and the "rings in..." labels ticking.
+// It only touches labels whose text actually changed, so an idle window does
+// no rendering work, and skips the header/list work entirely while the
+// window is hidden (minimized to tray): nobody can see it, so recomputing
+// the clock, moon phase and every row's countdown once a second would just
+// waste CPU in the background, forever. The tray label is cheap and stays
+// live either way, since that's the whole point of the tray icon.
 func (u *UI) refreshLoop() {
 	t := time.NewTicker(time.Second)
 	defer t.Stop()
 	for range t.C {
 		fyne.Do(func() {
 			now := time.Now()
-			u.updateClock(now)
-			for _, r := range u.rows {
-				next := u.rowWhen(r.alarm, now)
-				if next != r.last {
-					r.last = next
-					r.when.Text = next
-					r.when.Refresh()
+			if u.visible {
+				u.updateClock(now)
+				for _, r := range u.rows {
+					next := u.rowWhen(r.alarm, now)
+					if next != r.last {
+						r.last = next
+						r.when.Text = next
+						r.when.Refresh()
+					}
 				}
 			}
 			u.updateTrayNext()

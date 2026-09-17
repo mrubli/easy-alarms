@@ -54,12 +54,15 @@
             "-X main.version=${self.shortRev or "dev"}"
           ];
 
+          # Only easy-alarms (the Fyne GUI, cgo-linked) actually needs the GL/X11/
+          # Wayland/ALSA runtime libs. alarmctl is a plain internally-linked Go
+          # binary with no such deps: patchelf rewriting its rpath to this long
+          # string corrupts the ELF (segfaults on exec before main runs), so
+          # leave it untouched.
           postFixup = ''
-            for bin in $out/bin/easy-alarms $out/bin/alarmctl; do
-              if [ -f "$bin" ]; then
-                patchelf --set-rpath "${pkgs.lib.makeLibraryPath runtimeLibs}" "$bin" || true
-              fi
-            done
+            if [ -f "$out/bin/easy-alarms" ]; then
+              patchelf --set-rpath "${pkgs.lib.makeLibraryPath runtimeLibs}" "$out/bin/easy-alarms"
+            fi
           '';
 
           meta = with pkgs.lib; {
